@@ -429,7 +429,9 @@ local function gemInstance(gameId, warnings)
 	}
 end
 
-function pobtester_eval_game_build(jsonText, wantSkills, levelText)
+-- Builds a PoB build from the .build JSON. Returns an error JSON string, or nil plus the
+-- decoded file, warnings and level used.
+local function loadGameBuild(jsonText, levelText)
 	local err = startBuild(nil)
 	if err then
 		return err
@@ -553,24 +555,38 @@ function pobtester_eval_game_build(jsonText, wantSkills, levelText)
 	end
 	build.mainSocketGroup = 1
 	recalc()
+	return nil, d, warnings, level
+end
 
-	local r = evaluateCurrent(true)
-	-- There's no main skill in the export, so show the strongest one as main
-	if r.skills and #r.skills > 0 then
-		local best = r.skills[1]
-		for _, sk in ipairs(r.skills) do
-			if sk.dps > best.dps then
-				best = sk
-			end
+-- Makes the strongest skill the main skill. Returns the per-skill table and the best entry.
+local function useBestSkill()
+	local skills = skillTable()
+	local best
+	for _, sk in ipairs(skills) do
+		if not best or sk.dps > best.dps then
+			best = sk
 		end
+	end
+	if best and best.dps > 0 then
 		build.mainSocketGroup = best.group
 		build.skillsTab.socketGroupList[best.group].mainActiveSkill = best.active
 		recalc()
-		local skills = r.skills
-		r = evaluateCurrent(false)
-		r.skills, r.bestSkill = skills, { name = best.name, dps = best.dps }
+	end
+	return skills, best
+end
+
+function pobtester_eval_game_build(jsonText, wantSkills, levelText)
+	local err, d, warnings, level = loadGameBuild(jsonText, levelText)
+	if err then
+		return err
+	end
+	-- There's no main skill in the export, so show the strongest one as main
+	local skills, best = useBestSkill()
+	local r = evaluateCurrent(false)
+	r.skills = skills
+	if best and best.dps > 0 then
+		r.bestSkill = { name = best.name, dps = best.dps }
 		r.mainSkill = best.name
-		r.mainSocketGroup = best.group
 		r.mainActiveSkill = best.active
 	end
 	r.loadout = d.name
@@ -582,3 +598,21 @@ end
 function pobtester_log()
 	return dkjson.encode(logLines)
 end
+
+-- Shared with editor.lua
+POBTESTER = {
+	json = function() return dkjson end,
+	pick = pick,
+	recalc = recalc,
+	startBuild = startBuild,
+	groupLabel = groupLabel,
+	skillTable = skillTable,
+	evaluateCurrent = evaluateCurrent,
+	listLoadouts = listLoadouts,
+	loadGameBuild = loadGameBuild,
+	useBestSkill = useBestSkill,
+	makeItem = makeItem,
+	findUnique = findUnique,
+	lastLog = lastLog,
+}
+dofile(LUA_DIR .. "/editor.lua")

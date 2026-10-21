@@ -28,6 +28,18 @@ Summary
 - **Guides with no PoB code:** the script tests the in-game Build Planner file Mobalytics generates for each variant. That file has no gem levels, item quality or character level, so it assumes level 90 (change with `--level`), gems at their normal max level and default item rolls. Treat those numbers as rough.
 - pobb.in, poe.ninja and pastebin links, raw codes, and `.xml` / `.build` files work too.
 
+## Build editor
+
+Double-click `edit.bat` (or run `python pob_tester.py --edit [link]`). It opens a page in your browser where you load a build and change it, with DPS, EHP, life, ES, max hits and resists recalculated after every change and shown against the build as loaded:
+
+- **Gear:** replace any item by pasting its text (in game: hover it and press Ctrl+C), or remove it.
+- **Skills:** change gem levels and quality, turn gems or groups on and off, add or remove gems and supports, add new skills, and choose the main skill. "DPS of every skill" lists each skill's DPS.
+- **Passives:** search by name (or stat text), allocate with automatic pathing like in PoB, or remove. Shows how many points each one costs.
+- **Jewels:** paste a jewel into any allocated socket, or remove it. Allocate new sockets by searching "Jewel Socket".
+- Switch loadouts or variants, change character level, undo, reset, and **Copy PoB code** to take the edited build into Path of Building or pobb.in.
+
+The page only runs on your PC (127.0.0.1) and stops when you close the editor window. There is no clickable passive tree picture; passives are edited by search.
+
 ## Requirements
 
 - Windows with **Path of Building Community (PoE2)** installed (it is found automatically in `%APPDATA%`).
@@ -40,6 +52,7 @@ python pob_tester.py https://mobalytics.gg/poe-2/builds/some-build
 python pob_tester.py --skills https://pobb.in/abc123
 python pob_tester.py build.xml
 run.bat <link>           (same thing, double-click friendly)
+edit.bat [link]          (build editor in your browser)
 ```
 
 Several builds can be passed at once. PoB loads once (about 4 seconds); each loadout then takes a few seconds, mostly for trying every skill.
@@ -53,6 +66,7 @@ Several builds can be passed at once. PoB loads once (about 4 seconds); each loa
 | `--pob-dir PATH` | Use a PoB install somewhere other than `%APPDATA%` (or set `POB_DIR`) |
 | `--save-xml DIR` | Save each build as a PoB XML file you can open in PoB |
 | `--verbose` | Show PoB's own log output |
+| `--edit` | Open the build editor in your browser |
 
 ## Notes
 

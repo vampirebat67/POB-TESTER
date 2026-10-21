@@ -453,7 +453,9 @@ def summary(rows: list[tuple[str, dict]]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("builds", nargs="+", help="Mobalytics / pobb.in / poe.ninja link, PoB code, or file")
+    ap.add_argument("builds", nargs="*", help="Mobalytics / pobb.in / poe.ninja link, PoB code, or file")
+    ap.add_argument("--edit", action="store_true", help="open the build editor in your browser (optionally with a build)")
+    ap.add_argument("--port", type=int, default=0, help="port for --edit (default: any free port)")
     ap.add_argument("--skills", action="store_true", help="list the DPS of every skill")
     ap.add_argument("--fast", action="store_true", help="skip per-skill DPS (no 'best skill')")
     ap.add_argument("--level", type=int, default=90, help="character level for guides without a PoB code (default 90)")
@@ -468,6 +470,23 @@ def main(argv: list[str] | None = None) -> int:
     for attr in ("save_xml", "lua_lib", "pob_dir"):
         if getattr(args, attr):
             setattr(args, attr, getattr(args, attr).resolve())
+    if args.edit:
+        pob_dir = args.pob_dir or default_pob_dir()
+        if pob_dir is None:
+            print("Could not find Path of Building (PoE2). Pass --pob-dir.", file=sys.stderr)
+            return 1
+        source = args.builds[0] if args.builds else None
+        if source and len(source) < 260 and Path(source).exists():
+            source = str(Path(source).resolve())
+        import editor_server
+
+        print("Starting Path of Building...")
+        pob = PoB(pob_dir, args.lua_lib)
+        editor_server.run(pob, args.level, source, port=args.port)
+        return 0
+    if not args.builds:
+        ap.error("give at least one build link, code or file (or use --edit)")
+
     sources = [str(Path(b).resolve()) if len(b) < 260 and not b.startswith("http") and Path(b).exists() else b for b in args.builds]
 
     work: list[Build] = []
