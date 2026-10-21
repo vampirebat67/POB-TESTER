@@ -325,7 +325,10 @@ class PoB:
         return json.loads(self._call("pobtester_eval", build.data, skills))
 
     def log(self) -> list[str]:
-        return json.loads(self._call("pobtester_log"))
+        try:
+            return json.loads(self._call("pobtester_log"))
+        except Exception:
+            return []
 
 
 # ---------------------------------------------------------------------------
@@ -477,7 +480,12 @@ def main(argv: list[str] | None = None) -> int:
 
     results, rows = [], []
     for i, build in enumerate(work, 1):
-        r = pob.evaluate(build, skills=not args.fast, level=args.level)
+        try:
+            r = pob.evaluate(build, skills=not args.fast, level=args.level)
+        except RuntimeError as e:
+            # A Lua error in one build shouldn't stop the others
+            r = {"ok": False, "error": str(e)}
+            print("\n".join(pob.log()[-40:]), file=sys.stderr)
         if args.verbose:
             print("\n".join(pob.log()), file=sys.stderr)
         if args.save_xml:

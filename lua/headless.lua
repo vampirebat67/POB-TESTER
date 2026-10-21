@@ -304,6 +304,14 @@ local function pickByLevel(entries, level)
 	return best
 end
 
+-- BuildPlanner inventory ids -> PoB slot names (from PoB's Data/InventorySlots.lua, which
+-- older PoB installs don't ship)
+local slotByInventoryId = {
+	Weapon1 = "Weapon 1", Offhand1 = "Weapon 2", Weapon2 = "Weapon 1 Swap", Offhand2 = "Weapon 2 Swap",
+	Helm1 = "Helmet", BodyArmour1 = "Body Armour", Gloves1 = "Gloves", Boots1 = "Boots",
+	Amulet1 = "Amulet", Ring1 = "Ring 1", Ring2 = "Ring 2", Ring3 = "Ring 3", Belt1 = "Belt",
+}
+
 local function slotNameFor(entry)
 	local id, x = entry.inventory_id, entry.slot_x or 0
 	if id == "Charm1" then
@@ -315,11 +323,7 @@ local function slotNameFor(entry)
 		end
 		return "Charm " .. (x - 1)
 	end
-	for pobName, m in pairs(data.buildFileInventorySlotMap) do
-		if m.id == id and (m.slot_x or 0) == x then
-			return pobName
-		end
-	end
+	return slotByInventoryId[id]
 end
 
 local function numberless(line)
@@ -364,6 +368,21 @@ local function rareItemRaw(text)
 		raw[#raw + 1] = l
 	end
 	return table.concat(raw, "\n")
+end
+
+-- PoB changed how classes are constructed: older versions take new("Item", raw),
+-- newer ones new("Item"):Item(raw)
+local function makeItem(raw)
+	local ok, item = pcall(new, "Item", raw)
+	if ok and item and item.base then
+		return item
+	end
+	ok, item = pcall(function()
+		return new("Item"):Item(raw)
+	end)
+	if ok then
+		return item
+	end
 end
 
 local function findUnique(name)
@@ -429,10 +448,23 @@ function pobtester_eval_game_build(jsonText, wantSkills, levelText)
 	end
 
 	-- Passive tree
+	-- The .build file names passives by string id. Newer PoB trees carry those ids; for
+	-- older installs fall back to the table generated from PoB's dev-branch tree data.
 	local nodeByString = { }
 	for id, node in pairs(build.spec.nodes) do
 		if node.stringId then
 			nodeByString[node.stringId] = id
+		end
+	end
+	if not next(nodeByString) then
+		local ok, maps = pcall(dofile, LUA_DIR .. "/passive_ids.lua")
+		if ok and type(maps) == "table" then
+			local map = maps[build.spec.treeVersion] or maps["0_5"] or { }
+			for sid, id in pairs(map) do
+				if build.spec.nodes[id] then
+					nodeByString[sid] = id
+				end
+			end
 		end
 	end
 	local hashList, weaponSets, missing = { }, { }, 0
@@ -471,14 +503,14 @@ function pobtester_eval_game_build(jsonText, wantSkills, levelText)
 			if e.unique_name then
 				local dbItem = findUnique(e.unique_name)
 				if dbItem then
-					item = new("Item"):Item(dbItem.raw)
+					item = makeItem(dbItem.raw)
 				else
 					warnings[#warnings + 1] = "unique not in PoB: " .. e.unique_name
 				end
 			elseif e.additional_text then
 				local raw, badBase = rareItemRaw(e.additional_text)
 				if raw then
-					item = new("Item"):Item(raw)
+					item = makeItem(raw)
 				else
 					warnings[#warnings + 1] = "unknown item base: " .. tostring(badBase)
 				end
