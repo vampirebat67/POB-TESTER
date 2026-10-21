@@ -179,8 +179,7 @@ def mobalytics_builds(url: str) -> list[Build]:
         except Exception as e:
             print(f"  (variant {titles.get(vid, vid)}: {e})", file=sys.stderr)
             continue
-        short_name = name if len(name) <= 50 else name[:47] + "..."
-        builds.append(Build(f"{short_name}  [{titles.get(vid) or vid}]", "game", game_json, selected=vid == picked))
+        builds.append(Build(f"{name}  [{titles.get(vid) or vid}]", "game", game_json, selected=vid == picked))
     if not builds:
         raise ValueError("this Mobalytics build has no PoB code and no exportable variants")
     return builds
@@ -425,13 +424,28 @@ def report(build: Build, r: dict, show_skills: bool) -> str:
     return "\n".join(out)
 
 
+def fit(label: str, width: int) -> str:
+    """Shorten a label to width, keeping the [variant] part at the end readable."""
+    if len(label) <= width:
+        return label
+    m = re.search(r"\s*(\[[^\]]*\])\s*$", label)
+    tail = m.group(1) if m else ""
+    if not tail:
+        return label[: width - 3] + "..."
+    head = label[: m.start()].strip()
+    room = max(width - len(tail) - 4, 12)
+    if len(tail) > width - room - 4:
+        tail = tail[: width - room - 8] + "...]"
+    return head[:room] + "... " + tail
+
+
 def summary(rows: list[tuple[str, dict]]) -> str:
     """One line per build/loadout, for comparing variants at a glance."""
     lines = ["Summary", f"  {'build':<48} {'DPS':>9} {'EHP':>9} {'life':>7} {'ES':>7}"]
     for label, lo in rows:
         s = lo["stats"]
         dps = max(s.get("FullDPS") or 0, s.get("CombinedDPS") or 0, (lo.get("bestSkill") or {}).get("dps") or 0)
-        name = label if len(label) <= 48 else label[:45] + "..."
+        name = fit(label, 48)
         lines.append(f"  {name:<48} {short(dps):>9} {short(s.get('TotalEHP')):>9} {short(s.get('Life')):>7} {short(s.get('EnergyShield')):>7}")
     return "\n".join(lines)
 
@@ -492,14 +506,14 @@ def main(argv: list[str] | None = None) -> int:
             args.save_xml.mkdir(parents=True, exist_ok=True)
             xml = r.pop("xml", None) or (build.data if build.kind == "xml" else None)
             if xml:
-                safe = re.sub(r'[\\/:*?"<>|]+', "-", build.label)[:80]
+                safe = re.sub(r'[\\/:*?"<>|]+', "-", fit(build.label, 80))
                 (args.save_xml / f"{i:02d} {safe}.xml").write_text(xml, encoding="utf-8")
         r.pop("xml", None)
         r["label"] = build.label
         results.append(r)
         if r.get("ok"):
             for lo in r["loadouts"]:
-                rows.append((build.label + (f" [{lo['loadout']}]" if lo.get("loadout") and len(r["loadouts"]) > 1 else ""), lo))
+                rows.append((build.label + (f"  [{lo['loadout']}]" if lo.get("loadout") and len(r["loadouts"]) > 1 else ""), lo))
         if not args.json:
             print(report(build, r, args.skills))
     if args.json:
