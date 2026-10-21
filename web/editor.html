@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoE2 Build Editor</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #f4f3ef; --panel: #ffffff; --panel-2: #f0eee8; --line: #dcd8cf; --text: #1d1b17; --muted: #6b665c;
+  --accent: #a4661b; --accent-text: #ffffff; --up: #1f7a3a; --down: #b3261e; --rare: #9a7d0a; --unique: #a8521f;
+  --magic: #3657b8; --normal: #4a4740; --gem: #1b7f75; --support: #5a5fb0; --focus: #a4661b55;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121110; --panel: #1b1a18; --panel-2: #23211e; --line: #34312c; --text: #ece7dc; --muted: #9a9387;
+    --accent: #d99a3d; --accent-text: #1a1206; --up: #5cc97a; --down: #ff7b6e; --rare: #e6cf5a; --unique: #e08a4f;
+    --magic: #8aa4ff; --normal: #c8c2b6; --gem: #4fc1b5; --support: #9ea3ff; --focus: #d99a3d55;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.small { padding: 2px 8px; font-size: 12px; }
+button.link { background: none; border: none; color: var(--muted); padding: 2px 4px; }
+button.link:hover { color: var(--down); }
+input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 16px; }
+header { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+header .src { flex: 1 1 320px; min-width: 0; }
+h1 { font-size: 18px; margin: 14px 0 2px; overflow-wrap: anywhere; }
+.sub { color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.sub label { display: inline-flex; gap: 6px; align-items: center; }
+.sub input[type=number] { width: 64px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0 8px; }
+@media (max-width: 760px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.stat .k { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stat .d { font-size: 12px; font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.stat.main { border-color: var(--accent); }
+.up { color: var(--up); } .down { color: var(--down); } .muted { color: var(--muted); }
+.lastchange { min-height: 22px; font-size: 13px; color: var(--muted); }
+.notes { background: var(--panel-2); border-left: 3px solid var(--accent); padding: 6px 10px; margin: 8px 0; border-radius: 4px; font-size: 13px; }
+.error { background: color-mix(in srgb, var(--down) 14%, var(--panel)); border-left: 3px solid var(--down); padding: 6px 10px; margin: 8px 0; border-radius: 4px; }
+nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 12px; overflow-x: auto; }
+nav button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; color: var(--muted); }
+nav button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+section { padding: 14px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+.card h3 { margin: 0 0 2px; font-size: 13px; color: var(--muted); font-weight: 500; display: flex; justify-content: space-between; gap: 6px; }
+.iname { font-weight: 650; overflow-wrap: anywhere; }
+.iname.RARE { color: var(--rare); } .iname.UNIQUE { color: var(--unique); } .iname.MAGIC { color: var(--magic); } .iname.NORMAL { color: var(--normal); }
+.base { color: var(--muted); font-size: 12px; }
+.mods { margin: 6px 0 8px; padding: 0; list-style: none; font-size: 12.5px; }
+.mods li { overflow-wrap: anywhere; }
+.mods li.imp { color: var(--muted); font-style: italic; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.group { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.group.off { opacity: .55; }
+.group.ismain { border-color: var(--accent); }
+.ghead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.ghead .gl { font-weight: 650; flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 3px 6px; text-align: left; border-top: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; border-top: none; }
+td input[type=number] { width: 58px; padding: 2px 4px; }
+.gems td:nth-child(n+2), .gems th:nth-child(n+2) { width: 1%; white-space: nowrap; }
+.granted { font-size: 13px; }
+.granted .row { padding: 4px 0; border-top: 1px solid var(--line); }
+.gname { color: var(--gem); } .gname.sup { color: var(--support); } .gname.err { color: var(--down); }
+.addgem { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.addgem input { flex: 1 1 200px; min-width: 0; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.results { margin-top: 10px; }
+.node { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.node .nb { flex: 1; min-width: 0; }
+.node .nn { font-weight: 600; }
+.node .ns { font-size: 12px; color: var(--muted); }
+.tag { font-size: 11px; border: 1px solid var(--line); border-radius: 10px; padding: 0 6px; color: var(--muted); white-space: nowrap; }
+.tag.Keystone { border-color: var(--unique); color: var(--unique); } .tag.Notable { border-color: var(--rare); color: var(--rare); }
+.tag.Ascendancy { border-color: var(--magic); color: var(--magic); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; width: min(560px, calc(100vw - 32px)); padding: 16px; }
+dialog::backdrop { background: #0008; }
+dialog textarea { width: 100%; height: 260px; font: 12px/1.4 ui-monospace, Consolas, monospace; }
+.busy { position: fixed; top: 10px; right: 10px; background: var(--accent); color: var(--accent-text); padding: 4px 10px; border-radius: 6px; font-size: 13px; display: none; z-index: 5; }
+.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+.skilltable td:first-child { font-variant-numeric: tabular-nums; text-align: right; width: 90px; }
+@media (max-width: 600px) { .stat .v { font-size: 17px; } }
+</style>
+</head>
+<body>
+<div class="busy" id="busy">Calculating…</div>
+<div class="wrap">
+  <header>
+    <input class="src" id="src" placeholder="Mobalytics / pobb.in link or PoB code" aria-label="Build link or PoB code">
+    <button class="primary" id="loadBtn">Load</button>
+  </header>
+  <div id="err"></div>
+  <div id="app"><div class="empty">Paste a build link or PoB code above to start editing.</div></div>
+</div>
+
+<dialog id="paste">
+  <form method="dialog">
+    <h3 id="pasteTitle" style="margin-top:0">Paste item</h3>
+    <p class="muted" style="margin-top:0;font-size:13px">In game, hover the item and press Ctrl+C (or Ctrl+Alt+C for full details), then paste here. PoB item text works too.</p>
+    <textarea id="pasteText" spellcheck="false"></textarea>
+    <div class="actions" style="justify-content:flex-end;margin-top:10px">
+      <button value="cancel">Cancel</button>
+      <button class="primary" value="ok" id="pasteOk">Equip</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("t");
+let S = null;          // current state from the engine
+let BASE = null;       // stats when the build was loaded
+let tab = "gear";
+let gemNames = null;
+let lastSearch = "";
+
+const $ = (id) => document.getElementById(id);
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+async function api(action, body) {
+  $("busy").style.display = "block";
+  try {
+    const res = await fetch("/api/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Editor-Token": TOKEN },
+      body: JSON.stringify(body || {}),
+    });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: "The editor stopped. Start it again from edit.bat." };
+  } finally {
+    $("busy").style.display = "none";
+  }
+}
+
+function showError(msg) {
+  $("err").replaceChildren(msg ? h("div", { class: "error" }, msg) : "");
+}
+
+function fmt(n) {
+  if (n === undefined || n === null || isNaN(n)) return "–";
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (a >= 1e4) return (n / 1e3).toFixed(1) + "K";
+  return Math.round(n).toLocaleString();
+}
+
+function dps(st) {
+  return Math.max(st.FullDPS || 0, st.CombinedDPS || 0, st.TotalDPS || 0);
+}
+function eleMax(st) {
+  return Math.min(st.FireMaximumHitTaken ?? Infinity, st.ColdMaximumHitTaken ?? Infinity, st.LightningMaximumHitTaken ?? Infinity);
+}
+
+const STATS = [
+  { k: "DPS", get: dps, main: true },
+  { k: "Effective hit pool", get: (s) => s.TotalEHP },
+  { k: "Life", get: (s) => s.Life },
+  { k: "Energy shield", get: (s) => s.EnergyShield },
+  { k: "Max hit: physical", get: (s) => s.PhysicalMaximumHitTaken },
+  { k: "Max hit: elemental", get: eleMax },
+  { k: "Max hit: chaos", get: (s) => s.ChaosMaximumHitTaken },
+];
+
+function pct(cur, base) {
+  if (!base || cur === undefined || base === undefined || !isFinite(cur) || !isFinite(base)) return null;
+  return (cur - base) / Math.abs(base) * 100;
+}
+function deltaEl(p, label) {
+  if (p === null || Math.abs(p) < 0.05) return h("span", { class: "muted" }, label ? "" : "no change");
+  return h("span", { class: p > 0 ? "up" : "down" }, (p > 0 ? "+" : "") + p.toFixed(1) + "%" + (label ? " " + label : ""));
+}
+
+const arr = (x) => (Array.isArray(x) ? x : []);
+
+function setState(r, { fresh = false, prev = null } = {}) {
+  if (!r.ok) { showError(r.error || "Something went wrong"); return false; }
+  // The engine's JSON writes empty lists as {}
+  for (const k of ["items", "jewels", "groups", "passives", "loadouts", "notes", "variants"]) r[k] = arr(r[k]);
+  for (const g of r.groups) { g.gems = arr(g.gems); g.actives = arr(g.actives); }
+  for (const p of r.passives) p.stats = arr(p.stats);
+  r.stats = r.stats && !Array.isArray(r.stats) ? r.stats : {};
+  r.points = r.points || { used: 0, max: 0, ascendancy: 0, ascendancyMax: 8 };
+  showError("");
+  S = r;
+  if (fresh) BASE = r.stats;
+  render(prev);
+  return true;
+}
+
+async function act(action, body) {
+  const prev = S && S.stats;
+  const r = await api(action, body);
+  setState(r, { prev });
+  return r.ok;
+}
+
+function render(prev) {
+  const s = S, st = s.stats;
+  const app = $("app");
+  const who = [s.ascendancy || s.className, "level " + s.level].filter(Boolean).join(", ");
+
+  const head = h("div", {},
+    h("h1", {}, s.title || "Build"),
+    h("div", { class: "sub" },
+      h("span", {}, who),
+      s.variants && s.variants.length > 1 ? h("label", {}, "Variant",
+        h("select", { onchange: async (e) => { const r = await api("variant", { index: +e.target.value }); setState(r, { fresh: true }); } },
+          s.variants.map((v, i) => h("option", { value: i, selected: i === s.variant }, v.replace(/^.*\[(.*)\]\s*$/, "$1"))))) : null,
+      s.loadouts && s.loadouts.length > 1 ? h("label", {}, "Loadout",
+        h("select", { onchange: (e) => act("loadout", { name: e.target.value }) },
+          s.loadouts.map((l) => h("option", { value: l.name, selected: l.active }, l.name)))) : null,
+      h("label", {}, "Level", h("input", { type: "number", min: 1, max: 100, value: s.level,
+        onchange: (e) => act("level", { level: +e.target.value }) })),
+      h("button", { onclick: () => act("undo"), disabled: !s.canUndo }, "Undo"),
+      h("button", { onclick: () => { if (confirm("Undo all changes?")) act("reset").then(() => {}); } }, "Reset"),
+      h("button", { onclick: exportCode }, "Copy PoB code"),
+    ),
+  );
+
+  const statsEl = h("div", { class: "stats" }, STATS.map((d) => {
+    const v = d.get(st);
+    return h("div", { class: "stat" + (d.main ? " main" : "") },
+      h("div", { class: "k", title: d.main ? s.mainSkill : d.k }, d.main ? "DPS · " + (s.mainSkill || "main skill") : d.k),
+      h("div", { class: "v" }, fmt(v)),
+      h("div", { class: "d" }, BASE ? deltaEl(pct(v, d.get(BASE)), "vs loaded") : ""));
+  }),
+    h("div", { class: "stat" },
+      h("div", { class: "k" }, "Resists (fire/cold/light/chaos)"),
+      h("div", { class: "v", style: "font-size:16px" }, ["Fire", "Cold", "Lightning", "Chaos"].map((k) => Math.round(st[k + "Resist"] ?? 0)).join(" / ")),
+      h("div", { class: "d muted" }, `${s.points.used}/${s.points.max} points, ${s.points.ascendancy}/${s.points.ascendancyMax} asc.`)));
+
+  let last = "";
+  if (prev) {
+    const parts = [["DPS", dps], ["EHP", (x) => x.TotalEHP], ["life", (x) => x.Life], ["ES", (x) => x.EnergyShield]]
+      .map(([n, f]) => [n, pct(f(st), f(prev))]).filter(([, p]) => p !== null && Math.abs(p) >= 0.05);
+    last = h("div", { class: "lastchange" }, "Last change: ",
+      parts.length ? parts.map(([n, p], i) => [i ? ", " : "", deltaEl(p, n)]) : "no effect on DPS, EHP, life or ES",
+      s.changed ? h("span", { class: "muted" }, ` (${s.changed > 0 ? "+" : ""}${s.changed} passive points)`) : "");
+  } else last = h("div", { class: "lastchange" });
+
+  const notes = (s.notes || []).length ? h("div", { class: "notes" }, s.notes.map((n) => h("div", {}, n))) : "";
+
+  const tabs = [["gear", "Gear"], ["skills", "Skills"], ["tree", "Passives"], ["jewels", "Jewels"]];
+  const nav = h("nav", {}, tabs.map(([id, label]) =>
+    h("button", { class: tab === id ? "on" : "", onclick: () => { tab = id; render(); } }, label)));
+
+  const body = { gear: renderGear, skills: renderSkills, tree: renderTree, jewels: renderJewels }[tab]();
+  app.replaceChildren(head, statsEl, last, notes, nav, h("section", {}, body));
+}
+
+function itemCard(title, item, onReplace, onRemove) {
+  return h("div", { class: "card" },
+    h("h3", {}, h("span", {}, title)),
+    item ? [
+      h("div", { class: "iname " + (item.rarity || "") }, item.name),
+      item.base && item.base !== item.name ? h("div", { class: "base" }, item.base) : null,
+      h("ul", { class: "mods" },
+        [...(item.enchants || []), ...(item.runes || []), ...(item.implicits || [])].map((m) => h("li", { class: "imp" }, m)),
+        (item.explicits || []).map((m) => h("li", {}, m))),
+    ] : h("div", { class: "muted", style: "margin:6px 0 8px" }, "Empty"),
+    h("div", { class: "actions" },
+      h("button", { class: "small", onclick: onReplace }, item ? "Replace" : "Add"),
+      item && onRemove ? h("button", { class: "small", onclick: onRemove }, "Remove") : null));
+}
+
+function renderGear() {
+  return h("div", { class: "grid" }, S.items.filter((x) => x.item || !/^(Arm|Leg) /.test(x.slot)).map((x) =>
+    itemCard(x.slot, x.item,
+      () => pasteItem(`Item for ${x.slot}`, x.item && x.item.raw, (raw) => act("equip", { slot: x.slot, raw })),
+      () => act("unequip", { slot: x.slot }))));
+}
+
+function renderJewels() {
+  if (!S.jewels.length) return h("div", { class: "empty" }, "No jewel sockets allocated. Search \"Jewel Socket\" under Passives to add one.");
+  return h("div", {},
+    h("p", { class: "muted", style: "margin-top:0" }, "Allocated jewel sockets. To add a socket, search \"Jewel Socket\" under Passives."),
+    h("div", { class: "grid" }, S.jewels.map((j) =>
+      itemCard(`${j.name} #${j.node}${j.allocated ? "" : " (not allocated)"}`, j.item,
+        () => pasteItem("Jewel", j.item && j.item.raw, (raw) => act("jewel", { node: j.node, raw })),
+        () => act("jewel", { node: j.node, raw: "" })))));
+}
+
+function renderSkills() {
+  const wrap = h("div", {});
+  const list = h("datalist", { id: "gemlist" }, (gemNames || []).map((g) => h("option", { value: g.name })));
+  wrap.append(list,
+    h("div", { class: "row", style: "margin-bottom:10px" },
+      h("button", { onclick: showSkillTable }, "DPS of every skill"),
+      h("span", { class: "muted", style: "font-size:13px" }, "Tries each skill as main skill. Takes a few seconds."),
+    ),
+    h("div", { id: "skilltable" }));
+  // Main skill first, then the build's own groups; skills granted by items or the tree go last
+  const own = S.groups.filter((g) => !g.source);
+  own.sort((a, b) => (b.index === S.mainSocketGroup) - (a.index === S.mainSocketGroup));
+  const granted = S.groups.filter((g) => g.source);
+  for (const g of own) {
+    const isMain = g.index === S.mainSocketGroup;
+    const actives = g.actives.length > 1
+      ? h("select", { onchange: (e) => act("group", { group: g.index, main: true, active: +e.target.value }) },
+          g.actives.map((a) => h("option", { value: a.index, selected: isMain && a.index === g.mainActive }, a.name)))
+      : null;
+    const addIn = h("input", { list: "gemlist", placeholder: "Add gem or support…", "aria-label": "Add gem" });
+    const addGem = () => { if (addIn.value.trim()) act("add_gem", { group: g.index, name: addIn.value.trim() }); };
+    addIn.addEventListener("keydown", (e) => { if (e.key === "Enter") addGem(); });
+    wrap.append(h("div", { class: "group" + (g.enabled ? "" : " off") + (isMain ? " ismain" : "") },
+      h("div", { class: "ghead" },
+        h("span", { class: "gl" }, g.label || "(empty group)"),
+        isMain ? h("span", { class: "tag" }, "main skill") : h("button", { class: "small", onclick: () => act("group", { group: g.index, main: true, active: g.mainActive }) }, "Make main"),
+        actives,
+        h("label", { class: "row", style: "gap:4px" }, h("input", { type: "checkbox", checked: g.enabled,
+          onchange: (e) => act("group", { group: g.index, enabled: e.target.checked }) }), "on")),
+      h("table", { class: "gems" },
+        h("tr", {}, h("th", {}, "Gem"), h("th", {}, "Level"), h("th", {}, "Quality"), h("th", {}, "On"), h("th", {}, "")),
+        g.gems.map((gem) => h("tr", {},
+          h("td", { class: "gname" + (gem.support ? " sup" : "") + (gem.error ? " err" : ""), title: gem.error || "" }, gem.name),
+          h("td", {}, h("input", { type: "number", min: 1, max: 40, value: gem.level, "aria-label": "Level",
+            onchange: (e) => act("gem", { group: g.index, gem: gem.index, level: +e.target.value }) })),
+          h("td", {}, h("input", { type: "number", min: 0, max: 40, value: gem.quality, "aria-label": "Quality",
+            onchange: (e) => act("gem", { group: g.index, gem: gem.index, quality: +e.target.value }) })),
+          h("td", {}, h("input", { type: "checkbox", checked: gem.enabled, "aria-label": "Enabled",
+            onchange: (e) => act("gem", { group: g.index, gem: gem.index, enabled: e.target.checked }) })),
+          h("td", {}, h("button", { class: "link", title: "Remove", onclick: () => act("remove_gem", { group: g.index, gem: gem.index }) }, "✕"))))),
+      h("div", { class: "addgem" }, addIn, h("button", { class: "small", onclick: addGem }, "Add"))));
+  }
+  let grantedEl = null;
+  if (granted.length) {
+    const from = (src) => /^Tree:/.test(src) ? "passive tree" : src.replace(/^Item:\d+:/, "").replace(/,.*$/, "");
+    grantedEl = h("div", { class: "group granted", style: "margin-top:14px" },
+      h("div", { class: "ghead" }, h("span", { class: "gl" }, "Skills granted by items and passives")),
+      granted.map((g) => h("div", { class: "row" + (g.enabled ? "" : " muted") },
+        h("span", { style: "flex:1 1 200px;min-width:0" }, h("span", { class: "gname" }, g.label), h("span", { class: "muted" }, "  from " + from(g.source))),
+        g.index === S.mainSocketGroup ? h("span", { class: "tag" }, "main skill")
+          : h("button", { class: "small", onclick: () => act("group", { group: g.index, main: true, active: g.mainActive }) }, "Make main"),
+        h("label", { class: "row", style: "gap:4px" }, h("input", { type: "checkbox", checked: g.enabled,
+          onchange: (e) => act("group", { group: g.index, enabled: e.target.checked }) }), "on"))));
+  }
+  const newIn = h("input", { list: "gemlist", placeholder: "New skill group: type a skill gem…", "aria-label": "New skill" });
+  wrap.append(h("div", { class: "addgem" }, newIn,
+    h("button", { onclick: () => newIn.value.trim() && act("add_gem", { group: 0, name: newIn.value.trim() }) }, "Add skill")));
+  if (grantedEl) wrap.append(grantedEl);
+  if (!gemNames) api("gem_names").then((r) => { if (r.ok) { gemNames = arr(r.gems); if (tab === "skills") render(); } });
+  return wrap;
+}
+
+async function showSkillTable() {
+  const r = await api("skills");
+  if (!r.ok) return showError(r.error);
+  r.skills = arr(r.skills);
+  const rows = r.skills.filter((x) => x.dps > 0).sort((a, b) => b.dps - a.dps);
+  $("skilltable").replaceChildren(h("div", { class: "card", style: "margin-bottom:10px" },
+    h("table", { class: "skilltable" }, rows.map((x) => h("tr", {},
+      h("td", {}, fmt(x.dps)), h("td", {}, x.name),
+      h("td", {}, h("button", { class: "small", onclick: () => act("group", { group: x.group, main: true, active: x.active }) }, "Make main"))))),
+    rows.length < r.skills.length ? h("div", { class: "muted", style: "font-size:12px;margin-top:4px" }, `${r.skills.length - rows.length} skills with no damage hidden`) : ""));
+}
+
+function nodeRow(n) {
+  return h("div", { class: "node" },
+    h("div", { class: "nb" },
+      h("div", {}, h("span", { class: "nn" }, n.name), " ", h("span", { class: "tag " + n.type }, n.type === "Socket" ? "Jewel socket" : n.type),
+        !n.allocated && n.cost ? h("span", { class: "muted", style: "font-size:12px" }, `  ${n.cost} point${n.cost === 1 ? "" : "s"}`) : "",
+        !n.allocated && !n.cost ? h("span", { class: "muted", style: "font-size:12px" }, "  can't path from your tree") : ""),
+      (n.stats || []).length ? h("div", { class: "ns" }, n.stats.join(" · ")) : ""),
+    n.allocated
+      ? h("button", { class: "small", onclick: () => act("dealloc", { node: n.id }).then(() => lastSearch && search(lastSearch)) }, "Remove")
+      : h("button", { class: "small primary", disabled: !n.cost, onclick: () => act("alloc", { node: n.id }).then(() => lastSearch && search(lastSearch)) }, "Allocate"));
+}
+
+async function search(q) {
+  lastSearch = q;
+  const stats = $("searchStats") && $("searchStats").checked;
+  const r = await api("search_nodes", { query: q, stats });
+  const box = $("results");
+  if (!box) return;
+  if (!r.ok) return showError(r.error);
+  const nodes = arr(r.nodes).map((n) => ({ ...n, stats: arr(n.stats) }));
+  box.replaceChildren(nodes.length ? h("div", {}, nodes.map(nodeRow)) : h("div", { class: "muted" }, q.length < 2 ? "" : "No passives match."));
+}
+
+function renderTree() {
+  const q = h("input", { id: "searchIn", placeholder: "Search passives, e.g. \"Jewel Socket\", \"lightning\"", style: "flex:1 1 260px;min-width:0", value: lastSearch });
+  let timer = null;
+  q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(q.value.trim()), 250); });
+  const wrap = h("div", {},
+    h("div", { class: "row" }, q,
+      h("label", { class: "row", style: "gap:4px" }, h("input", { type: "checkbox", id: "searchStats", onchange: () => search(q.value.trim()) }), "search stat text too")),
+    h("p", { class: "muted", style: "font-size:13px" }, "Allocating takes the shortest path from your tree, like clicking in PoB. Removing a passive also removes passives that only connect through it."),
+    h("div", { id: "results", class: "results" }),
+    h("h3", { style: "margin:18px 0 4px;font-size:14px" }, `Allocated notables, keystones and ascendancy (${S.passives.length}), plus ${S.smallPassives} small passives`),
+    h("div", {}, S.passives.map((p) => nodeRow({ ...p, allocated: true }))));
+  if (lastSearch) setTimeout(() => search(lastSearch), 0);
+  return wrap;
+}
+
+let pasteCallback = null;
+function pasteItem(title, current, cb) {
+  $("pasteTitle").textContent = title;
+  $("pasteText").value = "";
+  $("pasteText").placeholder = current ? "Current item:\n\n" + current.replace(/\{[^}]*\}/g, "") : "Paste item text here";
+  pasteCallback = cb;
+  $("paste").showModal();
+  $("pasteText").focus();
+}
+$("paste").addEventListener("close", () => {
+  if ($("paste").returnValue === "ok" && pasteCallback && $("pasteText").value.trim()) pasteCallback($("pasteText").value);
+  pasteCallback = null;
+});
+
+async function exportCode() {
+  const r = await api("export");
+  if (!r.ok) return showError(r.error);
+  try { await navigator.clipboard.writeText(r.code); alert("PoB code copied. Import it in Path of Building or paste it on pobb.in."); }
+  catch { prompt("Copy this PoB code:", r.code); }
+}
+
+async function load(source) {
+  if (!source.trim()) return;
+  showError("");
+  $("app").replaceChildren(h("div", { class: "empty" }, "Loading build… (the first load tries every skill to find the main one, so it can take a few seconds)"));
+  const r = await api("load", { source });
+  if (!setState(r, { fresh: true })) $("app").replaceChildren(h("div", { class: "empty" }, "Paste a build link or PoB code above to start editing."));
+}
+
+$("loadBtn").addEventListener("click", () => load($("src").value));
+$("src").addEventListener("keydown", (e) => { if (e.key === "Enter") load($("src").value); });
+if (params.get("load")) {
+  try {
+    const src = atob(params.get("load").replace(/-/g, "+").replace(/_/g, "/"));
+    $("src").value = src;
+    load(src);
+  } catch { /* ignore a bad link */ }
+}
+</script>
+</body>
+</html>
