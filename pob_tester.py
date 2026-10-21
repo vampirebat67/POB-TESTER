@@ -2,12 +2,11 @@
 """Quick DPS / effective hit pool check for Path of Exile 2 builds, without opening PoB.
 
 Give it a Mobalytics build link, a pobb.in / poe.ninja / pastebin link, a raw PoB code,
-or a file containing one. It finds the Path of Building code, runs it through your
-installed Path of Building (PoE2) calculation engine with no window, and prints the
-numbers PoB would show in its sidebar.
+or a file containing one. It runs the build through your installed Path of Building
+(PoE2) calculation engine with no window and prints the numbers PoB would show.
 
     python pob_tester.py https://mobalytics.gg/poe-2/builds/some-build
-    python pob_tester.py --skills eNrtfWt...
+    python pob_tester.py --skills https://pobb.in/abc123
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from __future__ import annotations
 import argparse
 import base64
 import ctypes
-import html
 import json
 import os
 import re
@@ -25,6 +23,7 @@ import time
 import urllib.parse
 import urllib.request
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -36,7 +35,7 @@ USER_AGENT = (
 )
 
 # ---------------------------------------------------------------------------
-# Finding PoB codes
+# Getting builds
 # ---------------------------------------------------------------------------
 
 # PoB codes are zlib data in URL-safe base64, so they start with "eN" (best compression) or "eJ".
@@ -44,6 +43,17 @@ CODE_RE = re.compile(r"e[NJ][A-Za-z0-9_\-+/]{200,}={0,2}")
 POBBIN_RE = re.compile(r"pobb\.in/(?:u/[\w-]+/)?([\w-]{6,})", re.I)
 NINJA_RE = re.compile(r"poe\.ninja/(poe2/)?pob/(?:raw/)?([\w-]{4,})", re.I)
 PASTEBIN_RE = re.compile(r"pastebin\.com/(?:raw/)?(\w{6,})", re.I)
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+MOBALYTICS_API = "https://mobalytics.gg/api/poe-2/v1/graphql/query"
+
+
+@dataclass
+class Build:
+    label: str
+    kind: str  # "xml" (a PoB build) or "game" (the game's BuildPlanner .build JSON)
+    data: str
+    selected: bool = False  # the variant picked in the link
 
 
 def fetch(url: str, timeout: float = 30) -> str:
@@ -56,18 +66,10 @@ def decode_code(code: str) -> str:
     """PoB export code -> build XML."""
     code = code.strip().replace("+", "-").replace("/", "_")
     code += "=" * (-len(code) % 4)
-    data = base64.urlsafe_b64decode(code)
-    xml = zlib.decompress(data).decode("utf-8", errors="replace")
+    xml = zlib.decompress(base64.urlsafe_b64decode(code)).decode("utf-8", errors="replace")
     if "<PathOfBuilding" not in xml:
         raise ValueError("decoded data is not a Path of Building build")
     return xml
-
-
-def unescape_page(text: str) -> str:
-    """Undo the escaping that JSON blobs and HTML put around codes and links."""
-    text = html.unescape(text)
-    text = text.replace("\\u002F", "/").replace("\\u002f", "/").replace("\\/", "/")
-    return text
 
 
 def codes_in_text(text: str) -> list[str]:
@@ -83,89 +85,128 @@ def codes_in_text(text: str) -> list[str]:
     return found
 
 
-def resolve_link(url: str) -> list[tuple[str, str]]:
-    """A pobb.in / poe.ninja / pastebin link -> [(label, code)]."""
-    m = POBBIN_RE.search(url)
+def pob_code_from_share(text: str) -> str:
+    """A pobb.in / poe.ninja / pastebin link, or a raw code -> PoB code."""
+    text = text.strip()
+    m = POBBIN_RE.search(text)
     if m:
-        return [(f"pobb.in/{m.group(1)}", fetch(f"https://pobb.in/{m.group(1)}/raw").strip())]
-    m = NINJA_RE.search(url)
+        return fetch(f"https://pobb.in/{m.group(1)}/raw").strip()
+    m = NINJA_RE.search(text)
     if m:
-        paths = [f"https://poe.ninja/poe2/pob/raw/{m.group(2)}", f"https://poe.ninja/pob/raw/{m.group(2)}"]
-        for p in paths:
+        for url in (f"https://poe.ninja/poe2/pob/raw/{m.group(2)}", f"https://poe.ninja/pob/raw/{m.group(2)}"):
             try:
-                text = fetch(p).strip()
-                if codes_in_text(text):
-                    return [(f"poe.ninja/{m.group(2)}", codes_in_text(text)[0])]
+                codes = codes_in_text(fetch(url))
+                if codes:
+                    return codes[0]
             except Exception:
                 continue
         raise ValueError(f"could not download poe.ninja build {m.group(2)}")
-    m = PASTEBIN_RE.search(url)
+    m = PASTEBIN_RE.search(text)
     if m:
-        return [(f"pastebin/{m.group(1)}", fetch(f"https://pastebin.com/raw/{m.group(1)}").strip())]
-    raise ValueError(f"not a PoB share link: {url}")
+        return fetch(f"https://pastebin.com/raw/{m.group(1)}").strip()
+    codes = codes_in_text(text)
+    if codes:
+        return codes[0]
+    raise ValueError(f"not a PoB code or share link: {text[:80]}")
 
 
-def codes_from_page(url: str, save_html: Path | None = None) -> list[tuple[str, str]]:
-    """Any web page (Mobalytics build guides included) -> every PoB code it contains or links to."""
-    page = fetch(url)
-    if save_html:
-        save_html.write_text(page, encoding="utf-8")
-    text = unescape_page(page)
+# Mobalytics pages sit behind a Cloudflare challenge, but its GraphQL API does not.
 
-    results: list[tuple[str, str]] = []
-    seen: set[str] = set()
+def mobalytics_query(query: str) -> dict:
+    body = json.dumps({"query": query}).encode()
+    req = urllib.request.Request(
+        MOBALYTICS_API,
+        data=body,
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        out = json.loads(resp.read().decode("utf-8"))
+    if out.get("errors"):
+        raise ValueError("Mobalytics API error: " + "; ".join(e.get("message", "?") for e in out["errors"]))
+    return out["data"]
 
-    def add(label: str, code: str) -> None:
-        if code not in seen:
-            seen.add(code)
-            results.append((label, code))
 
-    for code in codes_in_text(text):
-        add("embedded code", code)
+DOC_FIELDS = """error data { id data { name pobCode buildVariants { values { id } } }
+  content { __typename ... on NgfDocumentCmWidgetContentVariantsV1 { data { childrenVariants { id title } } } } }"""
 
-    links = []
-    for rx, fmt in ((POBBIN_RE, "https://pobb.in/{}"), (PASTEBIN_RE, "https://pastebin.com/{}")):
-        for m in rx.finditer(text):
-            link = fmt.format(m.group(1))
-            if link not in links:
-                links.append(link)
-    for m in NINJA_RE.finditer(text):
-        link = f"https://poe.ninja/{m.group(1) or ''}pob/{m.group(2)}"
-        if link not in links:
-            links.append(link)
-    for link in links:
+
+def mobalytics_builds(url: str) -> list[Build]:
+    parts = urllib.parse.urlparse(url)
+    path = [p for p in parts.path.split("/") if p]
+    if "builds" not in path or path.index("builds") == len(path) - 1:
+        raise ValueError("not a Mobalytics build link")
+    key = path[path.index("builds") + 1]
+    if UUID_RE.match(key):
+        field, arg = "userGeneratedDocumentById", f"id:{json.dumps(key)}"
+    else:
+        field, arg = "userGeneratedDocumentBySlug", f'slug:{json.dumps(key)}, type:"builds"'
+    res = mobalytics_query(f"{{ poe2 {{ documents {{ {field}(input:{{{arg}}}) {{ {DOC_FIELDS} }} }} }} }}")
+    doc = res["poe2"]["documents"][field]
+    if not doc or doc.get("error") or not doc.get("data"):
+        raise ValueError(f"Mobalytics couldn't find that build ({(doc or {}).get('error')})")
+    doc_id = doc["data"]["id"]
+    info = doc["data"]["data"] or {}
+    name = info.get("name") or key
+
+    titles = {}
+    for widget in doc["data"].get("content") or []:
+        for v in ((widget.get("data") or {}).get("childrenVariants") or []):
+            titles[v["id"]] = v.get("title")
+    variant_ids = [v["id"] for v in ((info.get("buildVariants") or {}).get("values") or [])]
+    picked = None
+    for value in urllib.parse.parse_qs(parts.query).values():
+        for v in value:
+            if v.startswith("activeVariantId,"):
+                picked = v.split(",", 1)[1]
+
+    print(f"Mobalytics: {name}", file=sys.stderr)
+    if info.get("pobCode"):
+        # One PoB code; its loadouts usually match the guide's variants
+        return [Build(name, "xml", decode_code(pob_code_from_share(info["pobCode"])))]
+
+    # No PoB code: test the in-game build file Mobalytics generates for each variant
+    builds = []
+    for vid in variant_ids:
+        q = (
+            f"{{ poe2 {{ documents {{ userGeneratedDocumentById(input:{{id:{json.dumps(doc_id)}}}) "
+            f"{{ error errorMessage data {{ exportToGame(variantId:{json.dumps(vid)}) }} }} }} }} }}"
+        )
         try:
-            for label, code in resolve_link(link):
-                add(label, code)
-        except Exception as e:  # one dead link shouldn't sink the rest
-            print(f"  (skipped {link}: {e})", file=sys.stderr)
-    return results
+            out = mobalytics_query(q)["poe2"]["documents"]["userGeneratedDocumentById"]
+            game_json = (out.get("data") or {}).get("exportToGame")
+            if not game_json:
+                raise ValueError(out.get("errorMessage") or out.get("error") or "empty export")
+        except Exception as e:
+            print(f"  (variant {titles.get(vid, vid)}: {e})", file=sys.stderr)
+            continue
+        short_name = name if len(name) <= 50 else name[:47] + "..."
+        builds.append(Build(f"{short_name}  [{titles.get(vid) or vid}]", "game", game_json, selected=vid == picked))
+    if not builds:
+        raise ValueError("this Mobalytics build has no PoB code and no exportable variants")
+    return builds
 
 
-def gather(source: str, save_html: Path | None) -> list[tuple[str, str]]:
-    """One command-line argument -> [(label, xml)]."""
+def gather(source: str) -> list[Build]:
+    """One command-line argument -> builds to test."""
     path = Path(source)
     if len(source) < 260 and path.exists():
         text = path.read_text(encoding="utf-8", errors="replace")
         if "<PathOfBuilding" in text:
-            return [(path.name, text)]
-        codes = codes_in_text(text)
-        if not codes:
-            raise ValueError(f"no PoB code found in {path}")
-        return [(f"{path.name} #{i + 1}" if len(codes) > 1 else path.name, decode_code(c)) for i, c in enumerate(codes)]
+            return [Build(path.name, "xml", text)]
+        if text.lstrip().startswith("{") and '"passives"' in text:
+            return [Build(path.name, "game", text)]
+        return [Build(path.name, "xml", decode_code(pob_code_from_share(text)))]
 
     if source.startswith(("http://", "https://")):
         host = urllib.parse.urlparse(source).netloc.lower()
-        if any(h in host for h in ("pobb.in", "poe.ninja", "pastebin.com")):
-            pairs = resolve_link(source)
+        if "mobalytics.gg" in host:
+            builds = mobalytics_builds(source)
         else:
-            pairs = codes_from_page(source, save_html)
-            if not pairs:
-                hint = " (saved the page to --save-html for a look)" if save_html else " (try --save-html page.html to inspect it)"
-                raise ValueError(f"no Path of Building code found on {source}{hint}")
-        return [(label, decode_code(code)) for label, code in pairs]
+            builds = [Build(source, "xml", decode_code(pob_code_from_share(source)))]
+    else:
+        builds = [Build("pasted code", "xml", decode_code(source))]
+    return builds
 
-    return [("pasted code", decode_code(source))]
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +318,11 @@ class PoB:
         self.lib.lua_settop(self.L, 0)
         return out
 
-    def evaluate(self, xml: str, skills: bool = False) -> dict:
-        return json.loads(self._call("pobtester_eval", xml, skills))
+
+    def evaluate(self, build: Build, skills: bool, level: int) -> dict:
+        if build.kind == "game":
+            return json.loads(self._call("pobtester_eval_game_build", build.data, skills, str(level)))
+        return json.loads(self._call("pobtester_eval", build.data, skills))
 
     def log(self) -> list[str]:
         return json.loads(self._call("pobtester_log"))
@@ -304,20 +348,18 @@ def short(n: float | None) -> str:
     return f"{n:.1f}"
 
 
-def report(label: str, r: dict, show_skills: bool) -> str:
-    if not r.get("ok"):
-        return f"== {label} ==\n  PoB could not load this build: {r.get('error')}\n"
+def report_loadout(r: dict, show_skills: bool) -> list[str]:
     s = r["stats"]
     who = " ".join(x for x in (r.get("ascendancy") or r.get("className"), f"lvl {r.get('level')}") if x)
-    lines = [f"== {label} ==", f"  {who}   main skill: {r.get('mainSkill') or '-'}"]
+    lines = [f"  {who}   main skill: {r.get('mainSkill') or '-'}"]
 
     dps = []
     if s.get("FullDPS"):
         dps.append(f"Full DPS {short(s['FullDPS'])}")
-    main = s.get("CombinedDPS") or s.get("TotalDPS")
-    dps.append(f"Main skill DPS {short(main)}")
-    if s.get("TotalDot"):
-        dps.append(f"DoT {short(s['TotalDot'])}")
+    dps.append(f"main skill {short(s.get('CombinedDPS') or s.get('TotalDPS'))}")
+    best = r.get("bestSkill")
+    if best and best["dps"] > (s.get("CombinedDPS") or 0) * 1.001:
+        dps.append(f"best skill {short(best['dps'])} ({best['name']})")
     lines.append("  DPS      " + "   ".join(dps))
     hit = [f"avg hit {short(s.get('AverageHit') or s.get('AverageDamage'))}", f"{s.get('Speed', 0):.2f}/s"]
     if "CritChance" in s:
@@ -325,7 +367,6 @@ def report(label: str, r: dict, show_skills: bool) -> str:
     if "HitChance" in s and s["HitChance"] < 100:
         hit.append(f"hit chance {s['HitChance']:.0f}%")
     lines.append("           " + "   ".join(hit))
-
     lines.append(
         "  EHP      "
         + f"{short(s.get('TotalEHP'))}   life {short(s.get('Life'))}   ES {short(s.get('EnergyShield'))}"
@@ -344,7 +385,6 @@ def report(label: str, r: dict, show_skills: bool) -> str:
         + f"   armour {short(s.get('Armour'))}   evasion {short(s.get('Evasion'))}"
         + f"   block {s.get('BlockChance', 0):.0f}%"
     )
-
     if r.get("fullDPSSkills"):
         lines.append("  Full DPS is made of:")
         for sk in r["fullDPSSkills"]:
@@ -352,47 +392,79 @@ def report(label: str, r: dict, show_skills: bool) -> str:
             lines.append(f"    {short(sk.get('dps')):>9}  {sk.get('name')}{count}")
     if show_skills and r.get("skills"):
         lines.append("  Each skill as main skill:")
-        for sk in sorted(r["skills"], key=lambda x: -(x.get("dps") or 0)):
-            mark = "*" if sk["index"] == r.get("mainSocketGroup") else " "
-            lines.append(f"   {mark}{short(sk.get('dps')):>9}  {sk.get('name')}")
-    return "\n".join(lines) + "\n"
+        damaging = [sk for sk in r["skills"] if sk.get("dps")]
+        for sk in sorted(damaging, key=lambda x: -x["dps"]):
+            mark = "*" if sk["group"] == r.get("mainSocketGroup") else " "
+            lines.append(f"   {mark}{short(sk['dps']):>9}  {sk.get('name')}")
+        if len(damaging) < len(r["skills"]):
+            lines.append(f"    ({len(r['skills']) - len(damaging)} skills with no damage hidden)")
+    if r.get("assumed"):
+        lines.append(f"  Assumed: {r['assumed']} (the guide has no PoB code)")
+    for w in r.get("warnings") or []:
+        lines.append(f"  ! {w}")
+    return lines
+
+
+def report(build: Build, r: dict, show_skills: bool) -> str:
+    if not r.get("ok"):
+        return f"== {build.label} ==\n  PoB could not load this build: {r.get('error')}\n"
+    out = []
+    loadouts = r["loadouts"]
+    for lo in loadouts:
+        title = build.label
+        if lo.get("loadout") and len(loadouts) > 1:
+            title += f"  [{lo['loadout']}]"
+        if build.selected:
+            title += "  (variant in your link)"
+        out.append(f"== {title} ==")
+        out += report_loadout(lo, show_skills)
+        out.append("")
+    return "\n".join(out)
+
+
+def summary(rows: list[tuple[str, dict]]) -> str:
+    """One line per build/loadout, for comparing variants at a glance."""
+    lines = ["Summary", f"  {'build':<48} {'DPS':>9} {'EHP':>9} {'life':>7} {'ES':>7}"]
+    for label, lo in rows:
+        s = lo["stats"]
+        dps = max(s.get("FullDPS") or 0, s.get("CombinedDPS") or 0, (lo.get("bestSkill") or {}).get("dps") or 0)
+        name = label if len(label) <= 48 else label[:45] + "..."
+        lines.append(f"  {name:<48} {short(dps):>9} {short(s.get('TotalEHP')):>9} {short(s.get('Life')):>7} {short(s.get('EnergyShield')):>7}")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("builds", nargs="+", help="Mobalytics / pobb.in / poe.ninja link, PoB code, or file")
+    ap.add_argument("--skills", action="store_true", help="list the DPS of every skill")
+    ap.add_argument("--fast", action="store_true", help="skip per-skill DPS (no 'best skill')")
+    ap.add_argument("--level", type=int, default=90, help="character level for guides without a PoB code (default 90)")
     ap.add_argument("--pob-dir", type=Path, help="Path of Building (PoE2) folder (default: auto-detect)")
     ap.add_argument("--lua-lib", type=Path, help="LuaJIT shared library to use instead of PoB's lua51.dll")
-    ap.add_argument("--skills", action="store_true", help="also show DPS of every skill group")
     ap.add_argument("--json", action="store_true", help="print raw results as JSON")
-    ap.add_argument("--save-html", type=Path, help="save the fetched web page here (for debugging)")
-    ap.add_argument("--save-xml", type=Path, help="save each build's PoB XML into this folder")
+    ap.add_argument("--save-xml", type=Path, help="save each build as a PoB XML file in this folder (open them in PoB)")
     ap.add_argument("--verbose", action="store_true", help="show PoB's own log output")
     args = ap.parse_args(argv)
 
     # Resolve file paths before PoB changes the working directory
-    for attr in ("save_html", "save_xml", "lua_lib", "pob_dir"):
+    for attr in ("save_xml", "lua_lib", "pob_dir"):
         if getattr(args, attr):
             setattr(args, attr, getattr(args, attr).resolve())
-    builds = [str(Path(b).resolve()) if not b.startswith(("http", "eN", "eJ")) and Path(b).exists() else b for b in args.builds]
+    sources = [str(Path(b).resolve()) if len(b) < 260 and not b.startswith("http") and Path(b).exists() else b for b in args.builds]
 
-    work: list[tuple[str, str]] = []
-    for src in builds:
+    work: list[Build] = []
+    for src in sources:
         try:
-            pairs = gather(src, args.save_html)
+            found = gather(src)
         except Exception as e:
-            print(f"!! {src}: {e}", file=sys.stderr)
+            print(f"!! {src[:100]}: {e}", file=sys.stderr)
             continue
-        name = src if len(src) <= 90 else src[:40] + "..."
-        for label, xml in pairs:
-            work.append((label if len(builds) == 1 else f"{name} | {label}", xml))
+        if len(sources) > 1 and len(found) > 1 and not src.startswith("http"):
+            for b in found:
+                b.label = f"{Path(src).name} | {b.label}"
+        work += found
     if not work:
         return 1
-
-    if args.save_xml:
-        args.save_xml.mkdir(parents=True, exist_ok=True)
-        for i, (_, xml) in enumerate(work, 1):
-            (args.save_xml / f"build_{i}.xml").write_text(xml, encoding="utf-8")
 
     pob_dir = args.pob_dir or default_pob_dir()
     if pob_dir is None:
@@ -401,19 +473,31 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
     pob = PoB(pob_dir, args.lua_lib)
     if not args.json:
-        print(f"PoB {pob.version} loaded in {time.time() - t0:.1f}s, {len(work)} build(s)\n")
+        print(f"PoB {pob.version} loaded in {time.time() - t0:.1f}s\n")
 
-    results = []
-    for label, xml in work:
-        r = pob.evaluate(xml, skills=args.skills)
-        r["label"] = label
-        results.append(r)
+    results, rows = [], []
+    for i, build in enumerate(work, 1):
+        r = pob.evaluate(build, skills=not args.fast, level=args.level)
         if args.verbose:
             print("\n".join(pob.log()), file=sys.stderr)
+        if args.save_xml:
+            args.save_xml.mkdir(parents=True, exist_ok=True)
+            xml = r.pop("xml", None) or (build.data if build.kind == "xml" else None)
+            if xml:
+                safe = re.sub(r'[\\/:*?"<>|]+', "-", build.label)[:80]
+                (args.save_xml / f"{i:02d} {safe}.xml").write_text(xml, encoding="utf-8")
+        r.pop("xml", None)
+        r["label"] = build.label
+        results.append(r)
+        if r.get("ok"):
+            for lo in r["loadouts"]:
+                rows.append((build.label + (f" [{lo['loadout']}]" if lo.get("loadout") and len(r["loadouts"]) > 1 else ""), lo))
         if not args.json:
-            print(report(label, r, args.skills))
+            print(report(build, r, args.skills))
     if args.json:
         print(json.dumps(results, indent=2))
+    elif len(rows) > 1:
+        print(summary(rows))
     return 0 if all(r.get("ok") for r in results) else 2
 
 
