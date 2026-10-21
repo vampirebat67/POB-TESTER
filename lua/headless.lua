@@ -210,7 +210,9 @@ local function evaluateCurrent(wantSkills)
 	end
 	result.level = build.characterLevel
 	result.mainSocketGroup = build.mainSocketGroup
-	result.mainSkill = groupLabel(build.skillsTab.socketGroupList[build.mainSocketGroup])
+	local mainGroup = build.skillsTab.socketGroupList[build.mainSocketGroup]
+	result.mainActiveSkill = mainGroup and mainGroup.mainActiveSkill or 1
+	result.mainSkill = groupLabel(mainGroup)
 	result.stats = pick(build.calcsTab.mainOutput)
 
 	local skillDPS = build.calcsTab.mainOutput.SkillDPS
@@ -569,6 +571,7 @@ function pobtester_eval_game_build(jsonText, wantSkills, levelText)
 		r.skills, r.bestSkill = skills, { name = best.name, dps = best.dps }
 		r.mainSkill = best.name
 		r.mainSocketGroup = best.group
+		r.mainActiveSkill = best.active
 	end
 	r.loadout = d.name
 	r.assumed = "level " .. level .. ", gems at max natural level, no quality"

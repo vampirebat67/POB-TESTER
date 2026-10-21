@@ -396,7 +396,8 @@ def report_loadout(r: dict, show_skills: bool) -> list[str]:
         lines.append("  Each skill as main skill:")
         damaging = [sk for sk in r["skills"] if sk.get("dps")]
         for sk in sorted(damaging, key=lambda x: -x["dps"]):
-            mark = "*" if sk["group"] == r.get("mainSocketGroup") else " "
+            is_main = sk["group"] == r.get("mainSocketGroup") and sk.get("active", 1) == r.get("mainActiveSkill", 1)
+            mark = "*" if is_main else " "
             lines.append(f"   {mark}{short(sk['dps']):>9}  {sk.get('name')}")
         if len(damaging) < len(r["skills"]):
             lines.append(f"    ({len(r['skills']) - len(damaging)} skills with no damage hidden)")
